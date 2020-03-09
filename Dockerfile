@@ -1,39 +1,47 @@
-FROM travix/base-alpine:latest
+FROM nginxinc/nginx-unprivileged:stable-alpine
 
-MAINTAINER Travix
+USER root
 
-# build time environment variables
-ENV USER_NAME=nginx \
-    USER_ID=999 \
-    GROUP_NAME=nginx \
-    GROUP_ID=999
+ENV EASYRSA_CRL_DAYS=3650 \
+    EASYRSA_CA_EXPIRE=3650 \
+    EASYRSA_CERT_EXPIRE=1095 \
+    EASYRSA_PKI=/var/cache/nginx/pki \
+    EASYRSA_REQ_COUNTRY="NZ" \
+    EASYRSA_REQ_PROVINCE="Wellington" \
+    EASYRSA_REQ_CITY="Wellington" \
+    EASYRSA_REQ_ORG="Copyleft Ltd" \
+    EASYRSA_REQ_EMAIL="webmaster@copyleft.nz" \
+    EASYRSA_REQ_OU="Copyleft-OPS" \
+    EASYRSA_KEY_SIZE=4096 \
+    EASYRSA_ALGO="rsa" \
+    EASYRSA_DN="org"
 
-# install nginx
-RUN addgroup -S -g $GROUP_ID $GROUP_NAME \
-    && adduser -S -G $GROUP_NAME -u $USER_ID $USER_NAME \
-    && apk --update add \
-    nginx \
-    && rm /var/cache/apk/* \
-    && ln -sf /dev/stdout /var/log/nginx/access.log \
-    && ln -sf /dev/stderr /var/log/nginx/error.log \
-    && mkdir -p /tmp/nginx/client_body_temp \
-    && mkdir -p /tmp/nginx/proxy_temp
+RUN apk add --no-cache easy-rsa bash && \
+    mkdir /pki && \
+    ln -s /usr/share/easy-rsa/easyrsa /usr/bin/easyrsa
 
+# Make /var/cache/nginx/ writable by non-root users
+RUN chgrp -R nginx /var/cache/nginx/ \
+    && chmod -R g=u /var/cache/nginx/ \
+    && addgroup nginx root \
+    && chmod 664 /etc/passwd \
+    # nginx user must own the cache directory to write cache
+    && chown -R nginx:root /var/cache/nginx \
+    # nginx user must be able to read config files
+    && chgrp -R 0 /etc/nginx \
+    && chmod -R g=u /etc/nginx
+
+# Add files
 ADD entrypoint.sh /entrypoint.sh
 ADD nginx.conf /etc/nginx/nginx.conf
 ADD ssl/ssl.pem /etc/ssl/private/ssl.pem
 ADD ssl/ssl.key /etc/ssl/private/ssl.key
 
-# expose ports
-EXPOSE 80 81 443
-
-# runtime environment variables
-ENV BACKEND_SERVER=localhost \
-    BACKEND_SERVER_PORT=80 \
-    WHITELIST_CIDRS=""
+EXPOSE 9443
+USER nginx
 
 # entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
 
 # start nginx
-CMD ["/usr/sbin/nginx"]
+CMD ["nginx", "-g", "daemon off;"]
